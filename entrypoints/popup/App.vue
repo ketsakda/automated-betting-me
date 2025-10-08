@@ -82,7 +82,7 @@ async function loadConfigurations() {
           meronButtonSelector: 'button.from-red-600.to-red-900.rounded-full',
           walaButtonSelector: 'button.from-blue-600.to-blue-900.rounded-full',
           usernameSelector: 'p.text-base.font-medium.text-white',
-          balanceSelector: 'button.bg-black span.text-white',
+          balanceSelector: 'button.bg-black.rounded-full span.text-white',
         },
       ];
       await saveConfigurationsToStorage();

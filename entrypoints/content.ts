@@ -84,88 +84,43 @@ export default defineContentScript({
 
       if (message.action === "getUsername") {
         const debug: string[] = [];
-        debug.push("🔍 Searching for username...");
+        debug.push("🔍 Searching for username and balance...");
 
-        // Debug: Log all p tags with text-right class
-        const allTextRightPs = document.querySelectorAll(
-          'p[class*="text-right"]',
-        );
-        debug.push(`Found ${allTextRightPs.length} <p> tags with "text-right"`);
+        const usernameSelector = message.usernameSelector || 'p.text-sm.text-right.pr-1.leading-none';
+        const balanceSelector = message.balanceSelector || 'p.text-sm, p.text-base';
 
-        allTextRightPs.forEach((p, i) => {
-          const text = p.textContent?.trim() || "";
-          debug.push(`  P${i}: "${text.substring(0, 30)}" - ${p.className}`);
-        });
+        debug.push(`Username selector: ${usernameSelector}`);
+        debug.push(`Balance selector: ${balanceSelector}`);
 
-        // Try multiple selectors to find the username
-        let usernameElement: Element | null = document.querySelector(
-          "p.text-sm.text-right.pr-1.leading-none",
-        );
+        let username = 'Not found';
+        let balance = 'Not found';
+
+        // Try to find username
+        const usernameElement = document.querySelector(usernameSelector);
         if (usernameElement) {
-          debug.push("✓ Found via: p.text-sm.text-right.pr-1.leading-none");
-        }
-
-        // Alternative: Find by parent div structure
-        if (!usernameElement) {
-          const parentDiv = document.querySelector(
-            "div.text-white.fill-white.text-right",
-          );
-          if (parentDiv) {
-            usernameElement = parentDiv.querySelector("p.text-sm.text-right");
-            if (usernameElement) {
-              debug.push("✓ Found via: div.text-white > p.text-sm.text-right");
-            }
-          }
-        }
-
-        // Fallback: Just find any p with text-right and pr-1
-        if (!usernameElement) {
-          usernameElement = document.querySelector("p.text-right.pr-1");
-          if (usernameElement) {
-            debug.push("✓ Found via: p.text-right.pr-1");
-          }
-        }
-
-        // Fallback: Find by partial class match
-        if (!usernameElement) {
-          usernameElement = document.querySelector("p.text-sm.pr-1");
-          if (usernameElement) {
-            debug.push("✓ Found via: p.text-sm.pr-1");
-          }
-        }
-
-        // Last resort: Find first p inside text-white div
-        if (!usernameElement) {
-          const parentDiv = document.querySelector("div.text-white");
-          if (parentDiv) {
-            usernameElement = parentDiv.querySelector("p");
-            if (usernameElement) {
-              debug.push("✓ Found via: div.text-white > p");
-            }
-          } else {
-            debug.push("❌ No div.text-white found");
-          }
-        }
-
-        const username = usernameElement?.textContent?.trim() || "Not found";
-
-        if (username !== "Not found") {
-          debug.push(`✅ Final username: "${username}"`);
+          username = usernameElement.textContent?.trim() || 'Not found';
+          debug.push(`✓ Username found: "${username}"`);
         } else {
-          debug.push("❌ Username element not found");
+          debug.push(`❌ Username element not found with selector: ${usernameSelector}`);
         }
 
-        console.log("Sending response:", {
-          username,
-          debugCount: debug.length,
-        });
+        // Try to find balance
+        const balanceElement = document.querySelector(balanceSelector);
+        if (balanceElement) {
+          balance = balanceElement.textContent?.trim() || 'Not found';
+          debug.push(`✓ Balance found: "${balance}"`);
+        } else {
+          debug.push(`❌ Balance element not found with selector: ${balanceSelector}`);
+        }
+
+        console.log('Sending response:', { username, balance, debugCount: debug.length });
 
         // Send response synchronously
         try {
-          sendResponse({ username, debug });
-          console.log("Response sent successfully");
+          sendResponse({ username, balance, debug });
+          console.log('Response sent successfully');
         } catch (err) {
-          console.error("Error sending response:", err);
+          console.error('Error sending response:', err);
         }
 
         // IMPORTANT: Return true to indicate we will send a response
