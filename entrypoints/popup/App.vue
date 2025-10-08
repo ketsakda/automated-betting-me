@@ -28,6 +28,8 @@ const usernameSelector = ref('p.text-sm.text-right.pr-1.leading-none');
 const balanceSelector = ref('p.text-vk884g-primary-color');
 const buttonSelector = ref('button.from-red-600.to-red-900'); // For backward compatibility
 const inputValue = ref('5');
+const limitBalance = ref('45');
+const autoBettingEnabled = ref(true);
 const status = ref('');
 const selectedButton = ref('red'); // 'red' or 'blue'
 const username = ref('Loading...');
@@ -410,6 +412,25 @@ function connectPusher() {
           wsMessages.value.push(`🔮 Fight #${fightNum}: ${predictedResult} (${confidence}%)`);
           console.log('Prediction details:', matchData);
 
+          // Check if auto-betting is enabled and limit balance hasn't been reached
+          if (!autoBettingEnabled.value) {
+            wsMessages.value.push(`⏸️ Auto-betting is disabled`);
+            return;
+          }
+
+          // Check limit balance
+          if (limitBalance.value) {
+            const currentBalance = parseFloat(balance.value.replace(/[^0-9.-]/g, ''));
+            const limit = parseFloat(limitBalance.value);
+
+            if (!isNaN(currentBalance) && !isNaN(limit) && currentBalance >= limit) {
+              autoBettingEnabled.value = false;
+              wsMessages.value.push(`🛑 Limit reached! Balance: ${balance.value} >= Limit: $${limit}`);
+              status.value = `Auto-betting stopped: Balance limit reached ($${limit})`;
+              return;
+            }
+          }
+
           // Auto-bet based on prediction
           if (predictedResult === 'MERON') {
             selectedButton.value = 'red';
@@ -677,6 +698,19 @@ async function runAutomation() {
       <div class="form-group">
         <label>Input Value:</label>
         <input v-model="inputValue" type="text" placeholder="5" />
+      </div>
+
+      <div class="form-group">
+        <label>Limit Balance:</label>
+        <input v-model="limitBalance" type="number" step="0.01" placeholder="Enter limit (e.g., 100)" />
+        <p class="hint-text">Auto-betting will stop when balance reaches this limit</p>
+      </div>
+
+      <div class="form-group">
+        <label class="toggle-label">
+          <input type="checkbox" v-model="autoBettingEnabled" class="toggle-checkbox" />
+          <span>Enable Auto-Betting</span>
+        </label>
       </div>
 
       <div class="form-group">
@@ -1460,5 +1494,34 @@ h1 {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+.hint-text {
+  font-size: 11px;
+  color: #666;
+  margin-top: 4px;
+  font-style: italic;
+}
+
+.toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
+  padding: 8px 0;
+}
+
+.toggle-checkbox {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: #667eea;
+}
+
+.toggle-label span {
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
 }
 </style>
