@@ -424,6 +424,14 @@ export default defineBackground(() => {
       });
       return true;
     }
+
+    if (message.action === 'testBet') {
+      const betType = message.betType || 'red';
+      addWsMessage(`🧪 Test bet triggered: ${betType === 'red' ? 'MERON' : 'WALA'}`);
+      runAutomation(betType);
+      sendResponse({ success: true });
+      return true;
+    }
   });
 
   // Register content script on install/update

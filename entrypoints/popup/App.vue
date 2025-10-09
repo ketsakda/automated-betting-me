@@ -247,6 +247,20 @@ async function fetchBalance() {
   }
 }
 
+// Manual test betting
+async function testBet(betType: 'red' | 'blue') {
+  try {
+    await browser.runtime.sendMessage({
+      action: 'testBet',
+      betType: betType
+    });
+    status.value = `Test bet triggered: ${betType === 'red' ? 'MERON' : 'WALA'}`;
+    setTimeout(() => { status.value = ''; }, 2000);
+  } catch (error) {
+    console.error('Failed to trigger test bet:', error);
+  }
+}
+
 // Initialize
 onMounted(async () => {
   await loadConfigurations();
@@ -427,6 +441,18 @@ onUnmounted(() => {
           <input type="checkbox" v-model="autoBettingEnabled" @change="updateBackgroundSettings" class="toggle-checkbox" />
           <span>Enable Auto-Betting</span>
         </label>
+      </div>
+
+      <div class="form-group">
+        <label>Test Betting (Manual Trigger):</label>
+        <div class="test-bet-buttons">
+          <button @click="testBet('red')" class="test-bet-btn meron-btn">
+            🔴 Test MERON
+          </button>
+          <button @click="testBet('blue')" class="test-bet-btn wala-btn">
+            🔵 Test WALA
+          </button>
+        </div>
       </div>
 
       <div class="form-group">
@@ -1081,5 +1107,50 @@ onUnmounted(() => {
   font-size: 13px;
   font-weight: 600;
   color: #333;
+}
+
+.test-bet-buttons {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.test-bet-btn {
+  flex: 1;
+  padding: 12px 16px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+
+.test-bet-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+}
+
+.test-bet-btn:active {
+  transform: translateY(0);
+}
+
+.test-bet-btn.meron-btn {
+  background: linear-gradient(135deg, #dc2626, #991b1b);
+  color: white;
+}
+
+.test-bet-btn.meron-btn:hover {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+}
+
+.test-bet-btn.wala-btn {
+  background: linear-gradient(135deg, #2563eb, #1e3a8a);
+  color: white;
+}
+
+.test-bet-btn.wala-btn:hover {
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
 }
 </style>
