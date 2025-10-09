@@ -141,6 +141,16 @@ export default defineBackground(() => {
 
       console.log(`Bet placed: ${betType === 'red' ? 'MERON' : 'WALA'}`);
       addWsMessage(`✅ Bet placed: ${betType === 'red' ? 'MERON' : 'WALA'}`);
+
+      // Refresh page after bet is placed (wait for automation to complete)
+      setTimeout(async () => {
+        try {
+          await browser.tabs.reload(tabs[0].id);
+          addWsMessage(`🔄 Page refreshed`);
+        } catch (error) {
+          console.error('Failed to refresh page:', error);
+        }
+      }, 5000); // Wait 5 seconds for bet to be registered
     } catch (error) {
       console.error('Failed to run automation:', error);
       addWsMessage(`❌ Bet failed: ${error}`);
@@ -299,6 +309,19 @@ export default defineBackground(() => {
             const fightNum = matchData?.match?.fight_number;
             const result = matchData?.match?.result;
             addWsMessage(`🏁 Fight #${fightNum} ended: ${result}`);
+
+            // Refresh page after match ends (wait 5 seconds)
+            setTimeout(async () => {
+              try {
+                const tabs = await browser.tabs.query({ active: true, currentWindow: true });
+                if (tabs[0]?.id) {
+                  await browser.tabs.reload(tabs[0].id);
+                  addWsMessage(`🔄 Page refreshed after match end`);
+                }
+              } catch (error) {
+                console.error('Failed to refresh page:', error);
+              }
+            }, 5000);
           }
         } catch (err) {
           console.error('Error processing message:', err);
