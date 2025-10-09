@@ -127,6 +127,16 @@ export default defineContentScript({
         return true;
       }
 
+      if (message.action === "clickHamburgerButton") {
+        console.log("Clicking hamburger button...");
+
+        const hamburgerSelector = message.hamburgerButtonSelector || 'button.inline-flex.items-center.justify-center.p-1.rounded-md';
+        const clicked = clickButton(hamburgerSelector);
+
+        sendResponse({ success: clicked });
+        return true;
+      }
+
       console.log("Unknown action:", message.action);
       // Return false for unknown actions
       return false;

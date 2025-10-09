@@ -54,6 +54,7 @@ export default defineBackground(() => {
             walaButtonSelector: 'button.from-blue-600.to-blue-900.rounded-full',
             usernameSelector: 'p.text-base.font-medium.text-white',
             balanceSelector: 'button.bg-black.rounded-full span.text-white',
+            hamburgerButtonSelector: 'button.inline-flex.items-center.justify-center.p-1.rounded-md',
           },
         ];
         await browser.storage.local.set({ selectorConfigs: configurations });
@@ -91,6 +92,7 @@ export default defineBackground(() => {
       currentSelectors.walaButtonSelector = config.walaButtonSelector;
       currentSelectors.usernameSelector = config.usernameSelector;
       currentSelectors.balanceSelector = config.balanceSelector;
+      currentSelectors.hamburgerButtonSelector = config.hamburgerButtonSelector;
     }
   }
 
@@ -153,6 +155,29 @@ export default defineBackground(() => {
     } catch (error) {
       console.error('Failed to fetch balance:', error);
     }
+  }
+
+  // Click hamburger button to refresh UI
+  async function clickHamburgerButton() {
+    try {
+      const tabs = await browser.tabs.query({ active: true, currentWindow: true });
+      if (tabs[0]?.id && currentSelectors.hamburgerButtonSelector) {
+        const response = await browser.tabs.sendMessage(tabs[0].id, {
+          action: 'clickHamburgerButton',
+          hamburgerButtonSelector: currentSelectors.hamburgerButtonSelector,
+        });
+        return response?.success || false;
+      }
+      return false;
+    } catch (error) {
+      console.error('Failed to click hamburger button:', error);
+      return false;
+    }
+  }
+
+  // Sleep helper function
+  function sleep(ms: number) {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   // Run automation (place bet)
@@ -326,6 +351,23 @@ export default defineBackground(() => {
                 await browser.storage.local.set({ autoBettingEnabled: false });
                 addWsMessage(`🛑 Limit reached! Balance: ${currentBalance} >= Limit: $${limit}`);
                 broadcastToPopup({ type: 'autoBettingDisabled', reason: 'Limit reached' });
+
+                // If username is "Not found" and we're using Option 2, try to refresh it
+                if (currentUsername === 'Not found' && selectedConfigName === 'Option 2') {
+                  addWsMessage(`🔄 Username not found, clicking hamburger to refresh...`);
+                  const clicked = await clickHamburgerButton();
+
+                  if (clicked) {
+                    addWsMessage(`✅ Hamburger button clicked, waiting for UI update...`);
+                    await sleep(1500); // Wait for UI to update
+
+                    // Fetch username again
+                    await fetchBalance();
+                    addWsMessage(`🔄 Username refreshed: ${currentUsername}`);
+                  } else {
+                    addWsMessage(`❌ Failed to click hamburger button`);
+                  }
+                }
 
                 // Send Telegram notification
                 const telegramMessage = `🛑 <b>Betting Limit Reached!</b>\n\n` +

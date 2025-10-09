@@ -332,6 +332,77 @@ onUnmounted(() => {
       </div>
     </div>
 
+    <div class="selectors-toggle">
+      <button @click="showSelectors = !showSelectors" class="toggle-button">
+        <span>{{ showSelectors ? '▼' : '▶' }}</span>
+        <span>{{ showSelectors ? 'Hide' : 'Show' }} Selector Configuration</span>
+      </button>
+    </div>
+
+    <div v-if="showSelectors" class="selectors-section">
+      <div class="form-row">
+        <div class="form-group">
+          <label>Bet Amount:</label>
+          <input v-model="inputValue" type="text" placeholder="5" @change="updateBackgroundSettings" />
+        </div>
+
+        <div class="form-group">
+          <label>Limit Balance:</label>
+          <input v-model="limitBalance" type="number" step="0.01" placeholder="Enter limit (e.g., 100)" @change="updateBackgroundSettings" />
+        </div>
+      </div>
+      <p class="hint-text">Auto-betting will stop when balance reaches the limit</p>
+
+      <div class="form-group">
+        <label class="toggle-label">
+          <input type="checkbox" v-model="autoBettingEnabled" @change="updateBackgroundSettings" class="toggle-checkbox" />
+          <span>Enable Auto-Betting</span>
+        </label>
+      </div>
+
+      <div class="form-group">
+        <label>Test Betting (Manual Trigger):</label>
+        <div class="test-bet-buttons">
+          <button @click="testBet('red')" class="test-bet-btn meron-btn">
+            🔴 Test MERON
+          </button>
+          <button @click="testBet('blue')" class="test-bet-btn wala-btn">
+            🔵 Test WALA
+          </button>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Username Selector:</label>
+        <input v-model="usernameSelector" type="text" placeholder="CSS selector for username" />
+      </div>
+
+      <div class="form-group">
+        <label>Balance Selector:</label>
+        <input v-model="balanceSelector" type="text" placeholder="CSS selector for balance" />
+      </div>
+
+      <div class="form-group">
+        <label>Checkbox Selector:</label>
+        <input v-model="checkboxSelector" type="text" placeholder="input[type='checkbox']" />
+      </div>
+
+      <div class="form-group">
+        <label>Input Selector:</label>
+        <input v-model="inputSelector" type="text" placeholder="input[type='number']" />
+      </div>
+
+      <div class="form-group">
+        <label>MERON Button Selector:</label>
+        <input v-model="meronButtonSelector" type="text" placeholder="button.from-red-600.to-red-900" />
+      </div>
+
+      <div class="form-group">
+        <label>WALA Button Selector:</label>
+        <input v-model="walaButtonSelector" type="text" placeholder="button.from-blue-600.to-blue-900" />
+      </div>
+    </div>
+
     <div class="username-display">
       <div class="user-info">
         <div class="info-row">
@@ -394,75 +465,6 @@ onUnmounted(() => {
       <div class="ws-header">WebSocket Messages (Background):</div>
       <div class="ws-message" v-for="(msg, index) in wsMessages" :key="index">
         {{ msg }}
-      </div>
-    </div>
-
-    <div class="selectors-toggle">
-      <button @click="showSelectors = !showSelectors" class="toggle-button">
-        <span>{{ showSelectors ? '▼' : '▶' }}</span>
-        <span>{{ showSelectors ? 'Hide' : 'Show' }} Selector Configuration</span>
-      </button>
-    </div>
-
-    <div v-if="showSelectors" class="selectors-section">
-      <div class="form-group">
-        <label>Username Selector:</label>
-        <input v-model="usernameSelector" type="text" placeholder="CSS selector for username" />
-      </div>
-
-      <div class="form-group">
-        <label>Balance Selector:</label>
-        <input v-model="balanceSelector" type="text" placeholder="CSS selector for balance" />
-      </div>
-
-      <div class="form-group">
-        <label>Checkbox Selector:</label>
-        <input v-model="checkboxSelector" type="text" placeholder="input[type='checkbox']" />
-      </div>
-
-      <div class="form-group">
-        <label>Input Selector:</label>
-        <input v-model="inputSelector" type="text" placeholder="input[type='number']" />
-      </div>
-
-      <div class="form-group">
-        <label>Input Value:</label>
-        <input v-model="inputValue" type="text" placeholder="5" @change="updateBackgroundSettings" />
-      </div>
-
-      <div class="form-group">
-        <label>Limit Balance:</label>
-        <input v-model="limitBalance" type="number" step="0.01" placeholder="Enter limit (e.g., 100)" @change="updateBackgroundSettings" />
-        <p class="hint-text">Auto-betting will stop when balance reaches this limit</p>
-      </div>
-
-      <div class="form-group">
-        <label class="toggle-label">
-          <input type="checkbox" v-model="autoBettingEnabled" @change="updateBackgroundSettings" class="toggle-checkbox" />
-          <span>Enable Auto-Betting</span>
-        </label>
-      </div>
-
-      <div class="form-group">
-        <label>Test Betting (Manual Trigger):</label>
-        <div class="test-bet-buttons">
-          <button @click="testBet('red')" class="test-bet-btn meron-btn">
-            🔴 Test MERON
-          </button>
-          <button @click="testBet('blue')" class="test-bet-btn wala-btn">
-            🔵 Test WALA
-          </button>
-        </div>
-      </div>
-
-      <div class="form-group">
-        <label>MERON Button Selector:</label>
-        <input v-model="meronButtonSelector" type="text" placeholder="button.from-red-600.to-red-900" />
-      </div>
-
-      <div class="form-group">
-        <label>WALA Button Selector:</label>
-        <input v-model="walaButtonSelector" type="text" placeholder="button.from-blue-600.to-blue-900" />
       </div>
     </div>
 
@@ -810,6 +812,17 @@ onUnmounted(() => {
 .refresh-button:hover {
   background: rgba(255, 255, 255, 0.3);
   transform: rotate(180deg);
+}
+
+.form-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 15px;
+}
+
+.form-row .form-group {
+  flex: 1;
+  margin-bottom: 0;
 }
 
 .form-group {
