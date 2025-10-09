@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref } from 'vue';
 
 // Configuration type definition
 interface SelectorConfig {
@@ -12,35 +12,36 @@ interface SelectorConfig {
   balanceSelector: string;
 }
 
-// UI State
+// Configuration management
 const configurations = ref<SelectorConfig[]>([]);
 const selectedConfigName = ref('Option 1');
 const newConfigName = ref('');
 const showSaveDialog = ref(false);
 const showSelectors = ref(false);
 
-// Individual selector refs (for editing)
+// Individual selector refs
 const checkboxSelector = ref('#auto');
 const inputSelector = ref('input[placeholder="Enter Amount"]');
 const meronButtonSelector = ref('button.from-red-600.to-red-900');
 const walaButtonSelector = ref('button.from-blue-600.to-blue-900');
 const usernameSelector = ref('p.text-sm.text-right.pr-1.leading-none');
 const balanceSelector = ref('p.text-vk884g-primary-color');
+const buttonSelector = ref('button.from-red-600.to-red-900'); // For backward compatibility
 const inputValue = ref('5');
 const limitBalance = ref('45');
 const autoBettingEnabled = ref(true);
-const selectedButton = ref('red');
-
-// Display data (from background)
+const status = ref('');
+const selectedButton = ref('red'); // 'red' or 'blue'
 const username = ref('Loading...');
 const balance = ref('...');
+const debugMessages = ref<string[]>([]);
+const autoRefresh = ref(true);
+let refreshInterval: number | null = null;
+let pusherWs: WebSocket | null = null;
 const wsStatus = ref('Disconnected');
 const wsMessages = ref<string[]>([]);
 const currentPrediction = ref<any>(null);
 const selectedChannel = ref('cockfight.channel.2');
-const status = ref('');
-const debugMessages = ref<string[]>([]);
-
 const availableChannels = [
   'cockfight.channel.1',
   'cockfight.channel.2',
@@ -48,88 +49,22 @@ const availableChannels = [
   'cockfight.channel.4',
 ];
 
-// Get initial state from background
-async function loadStateFromBackground() {
-  try {
-    const state = await browser.runtime.sendMessage({ action: 'getState' });
-    if (state) {
-      username.value = state.username || 'Not found';
-      balance.value = state.balance || 'Not found';
-      currentPrediction.value = state.prediction;
-      wsStatus.value = state.wsStatus || 'Disconnected';
-      wsMessages.value = state.wsMessages || [];
-      autoBettingEnabled.value = state.autoBettingEnabled ?? true;
-      limitBalance.value = state.limitBalance || '45';
-      selectedChannel.value = state.selectedChannel || 'cockfight.channel.2';
-      selectedConfigName.value = state.selectedConfigName || 'Option 1';
-    }
-  } catch (error) {
-    console.error('Failed to load state from background:', error);
+function updateButtonSelector() {
+  if (selectedButton.value === 'red') {
+    buttonSelector.value = meronButtonSelector.value;
+  } else {
+    buttonSelector.value = walaButtonSelector.value;
   }
 }
 
-// Listen for updates from background
-function setupBackgroundListener() {
-  browser.runtime.onMessage.addListener((message) => {
-    console.log('Popup received message:', message);
-
-    if (message.type === 'balanceUpdate') {
-      username.value = message.username || 'Not found';
-      balance.value = message.balance || 'Not found';
-    }
-
-    if (message.type === 'predictionUpdate') {
-      currentPrediction.value = message.prediction;
-    }
-
-    if (message.type === 'wsMessage') {
-      if (message.messages) {
-        wsMessages.value = message.messages;
-      } else if (message.message) {
-        wsMessages.value.push(message.message);
-        if (wsMessages.value.length > 15) {
-          wsMessages.value.shift();
-        }
-      }
-    }
-
-    if (message.type === 'autoBettingDisabled') {
-      autoBettingEnabled.value = false;
-      status.value = `Auto-betting stopped: ${message.reason}`;
-    }
-  });
-}
-
-// Send settings updates to background
-async function updateBackgroundSettings() {
-  await browser.runtime.sendMessage({
-    action: 'updateSettings',
-    autoBettingEnabled: autoBettingEnabled.value,
-    limitBalance: limitBalance.value,
-    selectedChannel: selectedChannel.value,
-    selectedConfigName: selectedConfigName.value,
-    inputValue: inputValue.value,
-  });
-}
-
-// Watch for changes and sync to background
-function watchChanges() {
-  // Channel change
-  const originalChannel = selectedChannel.value;
-  setInterval(() => {
-    if (selectedChannel.value !== originalChannel) {
-      updateBackgroundSettings();
-    }
-  }, 500);
-}
-
-// Configuration management
+// Configuration management functions
 async function loadConfigurations() {
   try {
     const result = await browser.storage.local.get('selectorConfigs');
     if (result.selectorConfigs && Array.isArray(result.selectorConfigs)) {
       configurations.value = result.selectorConfigs;
     } else {
+      // Initialize with default configurations
       configurations.value = [
         {
           name: 'Option 1',
@@ -150,10 +85,18 @@ async function loadConfigurations() {
           balanceSelector: 'button.bg-black.rounded-full span.text-white',
         },
       ];
-      await browser.storage.local.set({ selectorConfigs: configurations.value });
+      await saveConfigurationsToStorage();
     }
   } catch (error) {
     console.error('Failed to load configurations:', error);
+  }
+}
+
+async function saveConfigurationsToStorage() {
+  try {
+    await browser.storage.local.set({ selectorConfigs: configurations.value });
+  } catch (error) {
+    console.error('Failed to save configurations:', error);
   }
 }
 
@@ -166,8 +109,8 @@ function switchConfiguration() {
     walaButtonSelector.value = config.walaButtonSelector;
     usernameSelector.value = config.usernameSelector;
     balanceSelector.value = config.balanceSelector;
+    updateButtonSelector();
   }
-  updateBackgroundSettings();
 }
 
 function saveCurrentConfiguration() {
@@ -188,7 +131,7 @@ function saveCurrentConfiguration() {
     configurations.value.push(config);
   }
 
-  browser.storage.local.set({ selectorConfigs: configurations.value });
+  saveConfigurationsToStorage();
   status.value = `Configuration "${selectedConfigName.value}" saved!`;
   setTimeout(() => { status.value = ''; }, 2000);
 }
@@ -211,7 +154,7 @@ function saveAsNewConfiguration() {
 
   configurations.value.push(config);
   selectedConfigName.value = config.name;
-  browser.storage.local.set({ selectorConfigs: configurations.value });
+  saveConfigurationsToStorage();
   showSaveDialog.value = false;
   newConfigName.value = '';
   status.value = `Configuration "${config.name}" created!`;
@@ -231,55 +174,391 @@ function deleteConfiguration() {
     configurations.value.splice(index, 1);
     selectedConfigName.value = configurations.value[0].name;
     switchConfiguration();
-    browser.storage.local.set({ selectorConfigs: configurations.value });
+    saveConfigurationsToStorage();
     status.value = `Configuration "${deletedName}" deleted`;
     setTimeout(() => { status.value = ''; }, 2000);
   }
 }
 
-// Manual refresh
-async function fetchBalance() {
+async function fetchUsername() {
   try {
-    await browser.runtime.sendMessage({ action: 'fetchBalance' });
-  } catch (error) {
-    console.error('Failed to fetch balance:', error);
+    debugMessages.value = [];
+    debugMessages.value.push('Starting username fetch...');
+
+    const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+
+    if (!tab || !tab.id) {
+      username.value = 'No active tab';
+      debugMessages.value.push('❌ No active tab found');
+      return;
+    }
+
+    debugMessages.value.push(`✓ Active tab: ${tab.title || 'Unknown'}`);
+
+    const response = await browser.tabs.sendMessage(tab.id, {
+      action: 'getUsername',
+      usernameSelector: usernameSelector.value,
+      balanceSelector: balanceSelector.value,
+    });
+
+    debugMessages.value.push(`Response type: ${typeof response}`);
+    debugMessages.value.push(`Response received: ${JSON.stringify(response)}`);
+
+    if (!response) {
+      username.value = 'No response';
+      debugMessages.value.push('❌ Response is null/undefined');
+      debugMessages.value.push('💡 Content script may not be loaded');
+      return;
+    }
+
+    if (response?.username) {
+      username.value = response.username;
+      debugMessages.value.push(`✓ Username: ${response.username}`);
+    } else {
+      username.value = 'Not found';
+      debugMessages.value.push('❌ No username in response');
+    }
+
+    if (response?.balance) {
+      balance.value = response.balance;
+      debugMessages.value.push(`✓ Balance: ${response.balance}`);
+    } else {
+      balance.value = 'Not found';
+    }
+
+    if (response?.debug && Array.isArray(response.debug)) {
+      debugMessages.value.push('--- Content Script Debug ---');
+      debugMessages.value.push(...response.debug);
+    }
+  } catch (error: any) {
+    console.error('Fetch username error:', error);
+    username.value = 'Error';
+    debugMessages.value.push(`❌ Error: ${error?.message || 'Unknown error'}`);
+
+    if (error?.message?.includes('Receiving end does not exist')) {
+      username.value = 'Reload page';
+      debugMessages.value.push('💡 Try reloading the webpage');
+    }
   }
 }
 
-// Initialize
-onMounted(async () => {
-  await loadConfigurations();
-  await loadStateFromBackground();
+// Start auto-refresh
+function startAutoRefresh() {
+  // Initial fetch
+  setTimeout(() => {
+    fetchUsername().catch(err => {
+      console.error('Failed to fetch username:', err);
+      username.value = 'Error loading';
+      debugMessages.value = [`Error: ${err.message}`];
+    });
+  }, 100);
 
-  // Auto-select based on domain
-  try {
-    const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-    if (tab?.url) {
-      const url = new URL(tab.url);
-      if (url.hostname.includes('fun88kh.com')) {
-        selectedConfigName.value = 'Option 2';
-        switchConfiguration();
-      } else {
-        switchConfiguration();
-      }
-    }
-  } catch (err) {
-    console.error('Error checking domain:', err);
+  // Set up interval for auto-refresh
+  if (refreshInterval) {
+    clearInterval(refreshInterval);
   }
 
-  setupBackgroundListener();
+  refreshInterval = window.setInterval(() => {
+    if (autoRefresh.value) {
+      fetchUsername().catch(err => {
+        console.error('Auto-refresh failed:', err);
+      });
+    }
+  }, 5000); // Refresh every 5 seconds
+}
+
+// Stop auto-refresh when popup closes
+function stopAutoRefresh() {
+  if (refreshInterval) {
+    clearInterval(refreshInterval);
+    refreshInterval = null;
+  }
+}
+
+// Initialize and start auto-refresh on load
+try {
+  loadConfigurations().then(async () => {
+    // Check if we should auto-select based on domain
+    try {
+      const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+      if (tab?.url) {
+        const url = new URL(tab.url);
+        if (url.hostname.includes('fun88kh.com')) {
+          selectedConfigName.value = 'Option 2';
+          console.log('Auto-selected Option 2 for fun88kh.com');
+        }
+      }
+    } catch (err) {
+      console.error('Error checking domain:', err);
+    }
+    switchConfiguration(); // Load the selected config
+  });
+  startAutoRefresh();
+} catch (err) {
+  console.error('Setup error:', err);
+}
+
+// WebSocket connection to Pusher
+function connectPusher() {
+  const wsUrl = 'wss://ws-fun-analyzer.kravanh.dev/app/9cpbe4mbozz6fjriingr?protocol=7&client=js&version=8.4.0&flash=false';
+
+  wsStatus.value = 'Connecting...';
+  wsMessages.value.push(`📡 Connecting to Pusher...`);
+
+  try {
+    pusherWs = new WebSocket(wsUrl);
+
+    pusherWs.onopen = () => {
+      console.log('Pusher WebSocket connected');
+      wsStatus.value = 'Connected';
+      wsMessages.value.push('✅ Connected to Pusher');
+
+      // Subscribe to cockfight-matches channel
+      const subscribeMsg = {
+        event: 'pusher:subscribe',
+        data: {
+          channel: 'cockfight-matches'
+        }
+      };
+      pusherWs?.send(JSON.stringify(subscribeMsg));
+      wsMessages.value.push('📢 Subscribing to cockfight-matches');
+    };
+
+    pusherWs.onmessage = (event) => {
+      console.log('Pusher message:', event.data);
+      try {
+        const data = JSON.parse(event.data);
+
+        // Handle Pusher ping - respond with pong
+        if (data.event === 'pusher:ping') {
+          pusherWs?.send(JSON.stringify({ event: 'pusher:pong', data: {} }));
+          console.log('Sent pong response');
+          return;
+        }
+
+        // Handle Pusher errors
+        if (data.event === 'pusher:error') {
+          const errorData = typeof data.data === 'string' ? JSON.parse(data.data) : data.data;
+          wsMessages.value.push(`⚠️ Error: ${errorData.message}`);
+          console.error('Pusher error:', errorData);
+          return;
+        }
+
+        // Handle different event types
+        if (data.event === 'pusher:connection_established') {
+          wsMessages.value.push('✅ Connection established');
+        } else if (data.event === 'pusher_internal:subscription_succeeded') {
+          wsMessages.value.push('✅ Subscribed to channel');
+        } else if (data.event === '.match.betting.opened') {
+          // Parse data if needed
+          let matchData = data.data;
+          if (typeof matchData === 'string') {
+            matchData = JSON.parse(matchData);
+          }
+
+          // Filter by channel
+          if (matchData?.match?.channel_id !== selectedChannel.value) {
+            return;
+          }
+
+          const fightNum = matchData?.match?.fight_number;
+          wsMessages.value.push(`🎲 Betting opened: Fight #${fightNum}`);
+        } else if (data.event === '.match.betting.closed') {
+          // Parse data if needed
+          let matchData = data.data;
+          if (typeof matchData === 'string') {
+            matchData = JSON.parse(matchData);
+          }
+
+          // Filter by channel
+          if (matchData?.match?.channel_id !== selectedChannel.value) {
+            return;
+          }
+
+          const fightNum = matchData?.match?.fight_number;
+          wsMessages.value.push(`🚫 Betting closed: Fight #${fightNum}`);
+        } else if (data.event === 'match.predicted' || data.event === '.match.predicted') {
+          // Parse the data - it might be a string that needs parsing
+          let matchData = data.data;
+          if (typeof matchData === 'string') {
+            matchData = JSON.parse(matchData);
+          }
+
+          const match = matchData?.match;
+          const prediction = matchData?.prediction;
+          const channelId = match?.channel_id;
+
+          // Only process if it matches the selected channel
+          if (channelId !== selectedChannel.value) {
+            console.log(`Ignoring prediction from ${channelId}, listening to ${selectedChannel.value}`);
+            return;
+          }
+
+          const fightNum = match?.fight_number;
+          const predictedResult = match?.predicted_result?.toUpperCase();
+          const confidence = match?.prediction_confidence || prediction?.confidence;
+
+          // Store current prediction
+          currentPrediction.value = {
+            fightNumber: fightNum,
+            result: predictedResult,
+            confidence: parseFloat(confidence),
+            strategy: prediction?.strategy,
+            reasoning: prediction?.reasoning,
+            probabilities: prediction?.probabilities,
+            channel: channelId || 'Unknown'
+          };
+
+          wsMessages.value.push(`🔮 Fight #${fightNum}: ${predictedResult} (${confidence}%)`);
+          console.log('Prediction details:', matchData);
+
+          // Check if auto-betting is enabled and limit balance hasn't been reached
+          if (!autoBettingEnabled.value) {
+            wsMessages.value.push(`⏸️ Auto-betting is disabled`);
+            return;
+          }
+
+          // Check limit balance
+          if (limitBalance.value) {
+            const currentBalance = parseFloat(balance.value.replace(/[^0-9.-]/g, ''));
+            const limit = parseFloat(limitBalance.value);
+
+            if (!isNaN(currentBalance) && !isNaN(limit) && currentBalance >= limit) {
+              autoBettingEnabled.value = false;
+              wsMessages.value.push(`🛑 Limit reached! Balance: ${balance.value} >= Limit: $${limit}`);
+              status.value = `Auto-betting stopped: Balance limit reached ($${limit})`;
+              return;
+            }
+          }
+
+          // Auto-bet based on prediction
+          if (predictedResult === 'MERON') {
+            selectedButton.value = 'red';
+            wsMessages.value.push(`🤖 Auto-betting MERON...`);
+            setTimeout(() => runAutomation(), 500);
+          } else if (predictedResult === 'WALA') {
+            selectedButton.value = 'blue';
+            wsMessages.value.push(`🤖 Auto-betting WALA...`);
+            setTimeout(() => runAutomation(), 500);
+          }
+
+        } else if (data.event === '.match.ended') {
+          // Parse data if needed
+          let matchData = data.data;
+          if (typeof matchData === 'string') {
+            matchData = JSON.parse(matchData);
+          }
+
+          // Filter by channel
+          if (matchData?.match?.channel_id !== selectedChannel.value) {
+            return;
+          }
+
+          const fightNum = matchData?.match?.fight_number;
+          const result = matchData?.match?.result;
+          wsMessages.value.push(`🏁 Fight #${fightNum} ended: ${result}`);
+        } else {
+          wsMessages.value.push(`📨 ${data.event}: ${JSON.stringify(data.data || {}).substring(0, 50)}`);
+        }
+
+        // Keep only last 15 messages
+        if (wsMessages.value.length > 15) {
+          wsMessages.value.shift();
+        }
+      } catch (err) {
+        wsMessages.value.push(`📨 ${event.data.substring(0, 100)}`);
+      }
+    };
+
+    pusherWs.onerror = (error) => {
+      console.error('Pusher WebSocket error:', error);
+      wsStatus.value = 'Error';
+      wsMessages.value.push('❌ Connection error');
+    };
+
+    pusherWs.onclose = () => {
+      console.log('Pusher WebSocket closed');
+      wsStatus.value = 'Disconnected';
+      wsMessages.value.push('🔌 Disconnected from Pusher');
+
+      // Auto-reconnect after 3 seconds
+      setTimeout(() => {
+
+        if (!pusherWs || pusherWs.readyState === WebSocket.CLOSED) {
+          wsMessages.value.push('🔄 Reconnecting...');
+          connectPusher();
+        }
+        pusherWs?.send(JSON.stringify({ event: 'pusher:pong', data: {} }));
+      }, 3000);
+    };
+  } catch (err) {
+    console.error('Failed to connect to Pusher:', err);
+    wsStatus.value = 'Failed';
+    wsMessages.value.push(`❌ Failed: ${err}`);
+  }
+}
+
+function disconnectPusher() {
+  if (pusherWs) {
+    pusherWs.close();
+    pusherWs = null;
+  }
+}
+
+// Cleanup on unmount
+import { onUnmounted } from 'vue';
+onUnmounted(() => {
+  stopAutoRefresh();
+  disconnectPusher();
 });
 
-onUnmounted(() => {
-  // Cleanup if needed
-});
+// Connect to Pusher on load
+connectPusher();
+
+async function runAutomation() {
+  try {
+    const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+
+    if (!tab.id) {
+      status.value = 'Error: No active tab';
+      return;
+    }
+
+    // Update button selector based on selection
+    updateButtonSelector();
+
+    // Check if content script is ready
+    try {
+      await browser.tabs.sendMessage(tab.id, {
+        action: 'automate',
+        checkboxSelector: checkboxSelector.value,
+        inputSelector: inputSelector.value,
+        buttonSelector: buttonSelector.value,
+        inputValue: inputValue.value,
+      });
+
+      status.value = 'Automation triggered!';
+      setTimeout(() => {
+        status.value = '';
+      }, 3000);
+    } catch (error: any) {
+      if (error.message?.includes('Receiving end does not exist')) {
+        status.value = 'Please reload the webpage and try again';
+      } else {
+        status.value = `Error: ${error.message || error}`;
+      }
+    }
+  } catch (error: any) {
+    status.value = `Error: ${error.message || error}`;
+  }
+}
 </script>
 
 <template>
   <div class="popup-container">
     <div class="channel-selector-container">
       <label class="channel-label">Channel:</label>
-      <select v-model="selectedChannel" @change="updateBackgroundSettings" class="channel-select">
+      <select v-model="selectedChannel" class="channel-select">
         <option v-for="channel in availableChannels" :key="channel" :value="channel">
           {{ channel }}
         </option>
@@ -331,8 +610,14 @@ onUnmounted(() => {
           <span class="info-label">WS:</span>
           <span :class="['ws-status', wsStatus.toLowerCase()]">{{ wsStatus }}</span>
         </div>
+        <div class="info-row auto-refresh-row">
+          <label class="auto-refresh-label">
+            <input type="checkbox" v-model="autoRefresh" class="auto-refresh-checkbox" />
+            <span>Auto-refresh (5s)</span>
+          </label>
+        </div>
       </div>
-      <button @click="fetchBalance" class="refresh-button" title="Manual Refresh">
+      <button @click="fetchUsername" class="refresh-button" title="Manual Refresh">
         ↻
       </button>
     </div>
@@ -376,7 +661,7 @@ onUnmounted(() => {
     </div>
 
     <div v-if="wsMessages.length > 0" class="ws-messages">
-      <div class="ws-header">WebSocket Messages (Background):</div>
+      <div class="ws-header">WebSocket Messages:</div>
       <div class="ws-message" v-for="(msg, index) in wsMessages" :key="index">
         {{ msg }}
       </div>
@@ -412,18 +697,18 @@ onUnmounted(() => {
 
       <div class="form-group">
         <label>Input Value:</label>
-        <input v-model="inputValue" type="text" placeholder="5" @change="updateBackgroundSettings" />
+        <input v-model="inputValue" type="text" placeholder="5" />
       </div>
 
       <div class="form-group">
         <label>Limit Balance:</label>
-        <input v-model="limitBalance" type="number" step="0.01" placeholder="Enter limit (e.g., 100)" @change="updateBackgroundSettings" />
+        <input v-model="limitBalance" type="number" step="0.01" placeholder="Enter limit (e.g., 100)" />
         <p class="hint-text">Auto-betting will stop when balance reaches this limit</p>
       </div>
 
       <div class="form-group">
         <label class="toggle-label">
-          <input type="checkbox" v-model="autoBettingEnabled" @change="updateBackgroundSettings" class="toggle-checkbox" />
+          <input type="checkbox" v-model="autoBettingEnabled" class="toggle-checkbox" />
           <span>Enable Auto-Betting</span>
         </label>
       </div>
@@ -437,6 +722,24 @@ onUnmounted(() => {
         <label>WALA Button Selector:</label>
         <input v-model="walaButtonSelector" type="text" placeholder="button.from-blue-600.to-blue-900" />
       </div>
+
+      <div class="form-group">
+        <label>Select Button:</label>
+        <div class="button-selector">
+          <button @click="selectedButton = 'red'; updateButtonSelector()"
+            :class="['bet-option', 'red-bet', { active: selectedButton === 'red' }]" type="button">
+            🔴 MERON (Red)
+          </button>
+          <button @click="selectedButton = 'blue'; updateButtonSelector()"
+            :class="['bet-option', 'blue-bet', { active: selectedButton === 'blue' }]" type="button">
+            🔵 WALA (Blue)
+          </button>
+        </div>
+      </div>
+
+      <button @click="runAutomation" class="run-button">
+        Run Automation
+      </button>
     </div>
 
     <div v-if="status" class="status">{{ status }}</div>
@@ -502,6 +805,18 @@ onUnmounted(() => {
   box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.2);
 }
 
+h1 {
+  font-size: 24px;
+  margin-bottom: 5px;
+  color: #333;
+}
+
+.subtitle {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 15px;
+}
+
 .username-display {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   padding: 12px 16px;
@@ -544,6 +859,31 @@ onUnmounted(() => {
 .balance-value {
   color: #ffd700;
   font-size: 16px;
+}
+
+.auto-refresh-row {
+  margin-top: 4px;
+}
+
+.auto-refresh-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.8);
+  cursor: pointer;
+  user-select: none;
+}
+
+.auto-refresh-checkbox {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  accent-color: #ffd700;
+}
+
+.auto-refresh-label span {
+  font-weight: 500;
 }
 
 .ws-status {
@@ -806,6 +1146,23 @@ onUnmounted(() => {
   box-sizing: border-box;
 }
 
+.run-button {
+  width: 100%;
+  padding: 12px;
+  background-color: #4CAF50;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 16px;
+  font-weight: bold;
+  cursor: pointer;
+  margin-top: 10px;
+}
+
+.run-button:hover {
+  background-color: #45a049;
+}
+
 .status {
   margin-top: 15px;
   padding: 10px;
@@ -815,6 +1172,92 @@ onUnmounted(() => {
   font-size: 13px;
   color: #000;
   font-weight: 500;
+}
+
+.info {
+  margin-top: 20px;
+  padding: 15px;
+  background-color: #f9f9f9;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.info h3 {
+  margin-top: 0;
+  font-size: 14px;
+  color: #333;
+}
+
+.info ol {
+  margin: 10px 0 0 0;
+  padding-left: 20px;
+}
+
+.info li {
+  margin-bottom: 5px;
+  color: #666;
+}
+
+.note {
+  margin-top: 10px;
+  padding: 8px;
+  background-color: #fff3cd;
+  border-left: 3px solid #ffc107;
+  border-radius: 3px;
+  font-size: 11px;
+  color: #856404;
+}
+
+.button-selector {
+  display: flex;
+  gap: 10px;
+}
+
+.bet-option {
+  flex: 1;
+  padding: 12px;
+  border: 2px solid #ddd;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  background-color: #f5f5f5;
+  color: #666;
+}
+
+.bet-option:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.bet-option.active {
+  border-width: 3px;
+  transform: scale(1.05);
+}
+
+.red-bet {
+  background: linear-gradient(to bottom, #fee, #fdd);
+  border-color: #faa;
+}
+
+.red-bet.active {
+  background: linear-gradient(to bottom, #dc2626, #991b1b);
+  color: white;
+  border-color: #dc2626;
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);
+}
+
+.blue-bet {
+  background: linear-gradient(to bottom, #eff6ff, #dbeafe);
+  border-color: #93c5fd;
+}
+
+.blue-bet.active {
+  background: linear-gradient(to bottom, #2563eb, #1e3a8a);
+  color: white;
+  border-color: #2563eb;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
 }
 
 .debug-panel {
