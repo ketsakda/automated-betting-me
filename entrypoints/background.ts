@@ -26,7 +26,7 @@ export default defineBackground(() => {
   // Load configurations from storage
   async function loadConfigurations() {
     try {
-      const result = await browser.storage.local.get(['selectorConfigs', 'limitBalance', 'autoBettingEnabled', 'selectedChannel', 'selectedConfigName']);
+      const result = await browser.storage.local.get(['selectorConfigs', 'limitBalance', 'autoBettingEnabled', 'selectedChannel', 'selectedConfigName', 'inputValue']);
 
       if (result.selectorConfigs && Array.isArray(result.selectorConfigs)) {
         configurations = result.selectorConfigs;
@@ -66,6 +66,9 @@ export default defineBackground(() => {
       }
       if (result.selectedConfigName) {
         selectedConfigName = result.selectedConfigName;
+      }
+      if (result.inputValue !== undefined) {
+        currentSelectors.inputValue = result.inputValue;
       }
 
       // Load current configuration
@@ -144,11 +147,33 @@ export default defineBackground(() => {
     }
   }
 
+  // Update extension badge based on connection status
+  function updateBadge(status: string) {
+    if (status === 'Connected') {
+      browser.action.setBadgeText({ text: '●' });
+      browser.action.setBadgeBackgroundColor({ color: '#00FF00' }); // Green
+      browser.action.setTitle({ title: 'WebSocket: Connected' });
+    } else if (status === 'Connecting...') {
+      browser.action.setBadgeText({ text: '●' });
+      browser.action.setBadgeBackgroundColor({ color: '#FFA500' }); // Orange
+      browser.action.setTitle({ title: 'WebSocket: Connecting...' });
+    } else if (status === 'Disconnected') {
+      browser.action.setBadgeText({ text: '●' });
+      browser.action.setBadgeBackgroundColor({ color: '#FF0000' }); // Red
+      browser.action.setTitle({ title: 'WebSocket: Disconnected' });
+    } else if (status === 'Error') {
+      browser.action.setBadgeText({ text: '!' });
+      browser.action.setBadgeBackgroundColor({ color: '#FF0000' }); // Red
+      browser.action.setTitle({ title: 'WebSocket: Error' });
+    }
+  }
+
   // WebSocket connection
   function connectPusher() {
     const wsUrl = 'wss://ws-fun-analyzer.kravanh.dev/app/9cpbe4mbozz6fjriingr?protocol=7&client=js&version=8.4.0&flash=false';
 
     wsStatus = 'Connecting...';
+    updateBadge(wsStatus);
     addWsMessage(`📡 Connecting to Pusher...`);
 
     try {
@@ -157,6 +182,7 @@ export default defineBackground(() => {
       pusherWs.onopen = () => {
         console.log('Pusher WebSocket connected');
         wsStatus = 'Connected';
+        updateBadge(wsStatus);
         addWsMessage('✅ Connected to Pusher');
 
         const subscribeMsg = {
@@ -282,12 +308,14 @@ export default defineBackground(() => {
       pusherWs.onerror = (error) => {
         console.error('Pusher WebSocket error:', error);
         wsStatus = 'Error';
+        updateBadge(wsStatus);
         addWsMessage('❌ Connection error');
       };
 
       pusherWs.onclose = () => {
         console.log('Pusher WebSocket closed');
         wsStatus = 'Disconnected';
+        updateBadge(wsStatus);
         addWsMessage('🔌 Disconnected from Pusher');
 
         // Auto-reconnect
@@ -300,7 +328,8 @@ export default defineBackground(() => {
       };
     } catch (err) {
       console.error('Failed to connect to Pusher:', err);
-      wsStatus = 'Failed';
+      wsStatus = 'Error';
+      updateBadge(wsStatus);
       addWsMessage(`❌ Failed: ${err}`);
     }
   }
@@ -335,6 +364,7 @@ export default defineBackground(() => {
         limitBalance,
         selectedChannel,
         selectedConfigName,
+        inputValue: currentSelectors.inputValue,
       });
       return true;
     }
@@ -359,6 +389,7 @@ export default defineBackground(() => {
       }
       if (message.inputValue !== undefined) {
         currentSelectors.inputValue = message.inputValue;
+        browser.storage.local.set({ inputValue: message.inputValue });
       }
       sendResponse({ success: true });
       return true;

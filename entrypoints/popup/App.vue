@@ -62,6 +62,7 @@ async function loadStateFromBackground() {
       limitBalance.value = state.limitBalance || '45';
       selectedChannel.value = state.selectedChannel || 'cockfight.channel.2';
       selectedConfigName.value = state.selectedConfigName || 'Option 1';
+      inputValue.value = state.inputValue || '5';
     }
   } catch (error) {
     console.error('Failed to load state from background:', error);
