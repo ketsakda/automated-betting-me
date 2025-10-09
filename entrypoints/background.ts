@@ -1,6 +1,10 @@
 export default defineBackground(() => {
   console.log('Hello background!', { id: browser.runtime.id });
 
+  // Telegram configuration
+  const TELEGRAM_BOT_TOKEN = '5426678611:AAHrBdiyxWcpNpxIjNol5RXjbHuz8h5FXi8';
+  const TELEGRAM_CHAT_ID = '-1002055714349';
+
   // State management
   let pusherWs: WebSocket | null = null;
   let currentBalance = '';
@@ -87,6 +91,39 @@ export default defineBackground(() => {
       currentSelectors.walaButtonSelector = config.walaButtonSelector;
       currentSelectors.usernameSelector = config.usernameSelector;
       currentSelectors.balanceSelector = config.balanceSelector;
+    }
+  }
+
+  // Send Telegram notification
+  async function sendTelegramMessage(message: string) {
+    try {
+      const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          chat_id: TELEGRAM_CHAT_ID,
+          text: message,
+          parse_mode: 'HTML',
+        }),
+      });
+
+      if (response.ok) {
+        console.log('Telegram notification sent successfully');
+        addWsMessage('📱 Telegram notification sent');
+        return true;
+      } else {
+        const error = await response.text();
+        console.error('Failed to send Telegram message:', error);
+        addWsMessage('❌ Failed to send Telegram notification');
+        return false;
+      }
+    } catch (error) {
+      console.error('Error sending Telegram message:', error);
+      addWsMessage('❌ Telegram notification error');
+      return false;
     }
   }
 
@@ -289,6 +326,16 @@ export default defineBackground(() => {
                 await browser.storage.local.set({ autoBettingEnabled: false });
                 addWsMessage(`🛑 Limit reached! Balance: ${currentBalance} >= Limit: $${limit}`);
                 broadcastToPopup({ type: 'autoBettingDisabled', reason: 'Limit reached' });
+
+                // Send Telegram notification
+                const telegramMessage = `🛑 <b>Betting Limit Reached!</b>\n\n` +
+                  `👤 User: ${currentUsername}\n` +
+                  `💰 Current Balance: ${currentBalance}\n` +
+                  `📊 Limit: $${limit}\n` +
+                  `⏰ Time: ${new Date().toLocaleString()}\n\n` +
+                  `Auto-betting has been disabled.`;
+                await sendTelegramMessage(telegramMessage);
+
                 return;
               }
             }
