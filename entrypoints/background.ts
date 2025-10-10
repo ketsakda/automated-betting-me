@@ -180,6 +180,113 @@ export default defineBackground(() => {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
+  // Submit player data to API
+  async function submitPlayerData() {
+    console.log('🚀 submitPlayerData() called');
+    console.log('Current state:', {
+      username: currentUsername,
+      balance: currentBalance,
+      inputValue: currentSelectors.inputValue,
+      limitBalance: limitBalance,
+      autoBettingEnabled: autoBettingEnabled,
+      selectedChannel: selectedChannel,
+      selectedConfigName: selectedConfigName
+    });
+
+    try {
+      // Check if username is available
+      if (currentUsername === 'Not found' || !currentUsername) {
+        console.log('⚠️ Username not found, attempting to fetch...');
+        addWsMessage(`🔄 Username not found, fetching again...`);
+        await fetchBalance();
+        console.log('After fetchBalance:', { username: currentUsername, balance: currentBalance });
+
+        // If still not found and using Option 2, try hamburger button
+        if ((currentUsername === 'Not found' || !currentUsername) && selectedConfigName === 'Option 2') {
+          console.log('Trying hamburger button for Option 2...');
+          addWsMessage(`🔄 Trying hamburger button to refresh username...`);
+          const clicked = await clickHamburgerButton();
+
+          if (clicked) {
+            await sleep(1500); // Wait for UI to update
+            await fetchBalance();
+            console.log('After hamburger click:', { username: currentUsername, balance: currentBalance });
+            addWsMessage(`🔄 Username refreshed: ${currentUsername}`);
+          }
+        }
+      }
+
+      // Skip if username still not found
+      if (currentUsername === 'Not found' || !currentUsername) {
+        console.log('❌ Username still not found, aborting submission');
+        addWsMessage(`⚠️ Cannot submit player data: username not found`);
+        return false;
+      }
+
+      // Format current date as YYYY-MM-DD
+      const now = new Date();
+      const playDate = now.toISOString().split('T')[0];
+
+      // Parse numeric values
+      const balanceNum = parseFloat(currentBalance.replace(/[^0-9.-]/g, '')) || 0;
+      const betAmountNum = parseFloat(currentSelectors.inputValue) || 0;
+      const limitBalanceNum = parseFloat(limitBalance) || 0;
+
+      // Format option name to lowercase
+      const optionName = selectedConfigName.toLowerCase();
+
+      // Prepare data payload
+      const playerData = {
+        play_date: playDate,
+        username: currentUsername,
+        balance: balanceNum,
+        bet_amount: betAmountNum,
+        limit_balance: limitBalanceNum,
+        is_auto_bet: autoBettingEnabled,
+        channel_id: selectedChannel,
+        option: optionName
+      };
+
+      console.log('📤 Prepared player data:', JSON.stringify(playerData, null, 2));
+      addWsMessage(`📤 Submitting player data: ${currentUsername}...`);
+
+      // Submit to API
+      console.log('Sending POST request to https://fun-analyzer.kravanh.dev/api/players');
+      const response = await fetch('https://fun-analyzer.kravanh.dev/api/players', {
+        method: 'POST',
+        headers: {
+          'key': 'dataforme',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(playerData),
+      });
+
+      console.log('Response status:', response.status);
+      console.log('Response headers:', Object.fromEntries(response.headers.entries()));
+
+      if (response.ok) {
+        const responseData = await response.text();
+        console.log('✅ Success! Response data:', responseData);
+        addWsMessage(`✅ Player data submitted successfully`);
+        console.log('Player data submitted:', playerData);
+        return true;
+      } else {
+        const errorText = await response.text();
+        console.error('❌ API returned error status:', response.status);
+        console.error('Error response body:', errorText);
+        addWsMessage(`❌ Failed to submit player data: ${response.status}`);
+        console.error('API error:', errorText);
+        return false;
+      }
+    } catch (error) {
+      console.error('❌ Exception in submitPlayerData:', error);
+      console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
+      addWsMessage(`❌ Error submitting player data: ${error}`);
+      console.error('Failed to submit player data:', error);
+      return false;
+    }
+  }
+
   // Run automation (place bet)
   async function runAutomation(betType: 'red' | 'blue') {
     try {
@@ -207,8 +314,10 @@ export default defineBackground(() => {
       // Refresh page after bet is placed (wait for automation to complete)
       setTimeout(async () => {
         try {
-          await browser.tabs.reload(tabs[0].id);
-          addWsMessage(`🔄 Page refreshed`);
+          if (tabs[0]?.id) {
+            await browser.tabs.reload(tabs[0].id);
+            addWsMessage(`🔄 Page refreshed`);
+          }
         } catch (error) {
           console.error('Failed to refresh page:', error);
         }
@@ -269,6 +378,11 @@ export default defineBackground(() => {
         console.log('Pusher message:', event.data);
         try {
           const data = JSON.parse(event.data);
+
+          // Debug: Log the event type
+          if (data.event) {
+            console.log('📋 Event type:', data.event);
+          }
 
           // Handle Pusher ping
           if (data.event === 'pusher:ping') {
@@ -390,25 +504,63 @@ export default defineBackground(() => {
               addWsMessage(`🤖 Auto-betting WALA...`);
               setTimeout(() => runAutomation('blue'), 500);
             }
-          } else if (data.event === '.match.ended') {
+          } else if (data.event === 'match.ended' || data.event === '.match.ended') {
+            console.log('🎯 MATCH ENDED HANDLER TRIGGERED!');
+            addWsMessage(`🎯 Match ended event detected: ${data.event}`);
+            console.log('Raw event:', data.event);
+
             let matchData = data.data;
+            console.log('Raw matchData (before parse):', matchData);
             if (typeof matchData === 'string') matchData = JSON.parse(matchData);
-            if (matchData?.match?.channel_id !== selectedChannel) return;
+            console.log('Parsed matchData:', matchData);
+
+            console.log('📢 Match ended event received:', matchData);
+            console.log('Channel check:', {
+              matchChannel: matchData?.match?.channel_id,
+              selectedChannel: selectedChannel,
+              matches: matchData?.match?.channel_id === selectedChannel
+            });
+
+            addWsMessage(`📋 Channel: ${matchData?.match?.channel_id} (Selected: ${selectedChannel})`);
+
+            if (matchData?.match?.channel_id !== selectedChannel) {
+              console.log('⏭️ Skipping match from different channel');
+              addWsMessage(`⏭️ Skipped: Different channel`);
+              return;
+            }
 
             const fightNum = matchData?.match?.fight_number;
             const result = matchData?.match?.result;
+            console.log(`🏁 Match #${fightNum} ended with result: ${result}`);
             addWsMessage(`🏁 Fight #${fightNum} ended: ${result}`);
 
-            // Refresh page after match ends (wait 5 seconds)
+            // Submit player data and refresh page after match ends (wait 5 seconds)
+            console.log('⏰ Setting 5-second timeout for player data submission and page refresh');
+            addWsMessage(`⏰ Waiting 5 seconds before submission...`);
             setTimeout(async () => {
               try {
+                console.log('⏰ Timeout triggered, starting player data submission...');
+                addWsMessage(`⏰ 5 seconds elapsed, starting submission...`);
+
+                // Submit player data to API
+                await submitPlayerData();
+                console.log('✅ Player data submission completed');
+
+                // Refresh page
+                console.log('🔄 Starting page refresh...');
                 const tabs = await browser.tabs.query({ active: true, currentWindow: true });
                 if (tabs[0]?.id) {
                   await browser.tabs.reload(tabs[0].id);
                   addWsMessage(`🔄 Page refreshed after match end`);
+                  console.log('✅ Page refresh completed');
+                } else {
+                  console.log('❌ No active tab found for refresh');
+                  addWsMessage(`❌ No active tab for refresh`);
                 }
               } catch (error) {
-                console.error('Failed to refresh page:', error);
+                console.error('❌ Error in match end handler:', error);
+                addWsMessage(`❌ Error in match end handler: ${error}`);
+                console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
               }
             }, 5000);
           }
@@ -519,6 +671,37 @@ export default defineBackground(() => {
       addWsMessage(`🧪 Test bet triggered: ${betType === 'red' ? 'MERON' : 'WALA'}`);
       runAutomation(betType);
       sendResponse({ success: true });
+      return true;
+    }
+
+    if (message.action === 'testHamburgerClick') {
+      addWsMessage(`🧪 Testing hamburger button click...`);
+      clickHamburgerButton().then((success) => {
+        if (success) {
+          addWsMessage(`✅ Hamburger button clicked successfully`);
+          // Wait and refetch balance
+          setTimeout(async () => {
+            await fetchBalance();
+            addWsMessage(`🔄 Balance refreshed after hamburger click`);
+          }, 1500);
+        } else {
+          addWsMessage(`❌ Failed to click hamburger button`);
+        }
+        sendResponse({ success });
+      });
+      return true;
+    }
+
+    if (message.action === 'testSubmitPlayerData') {
+      addWsMessage(`🧪 Manual test: Submitting player data...`);
+      submitPlayerData().then((success) => {
+        if (success) {
+          addWsMessage(`✅ Player data submitted successfully (manual test)`);
+        } else {
+          addWsMessage(`❌ Player data submission failed (manual test)`);
+        }
+        sendResponse({ success });
+      });
       return true;
     }
   });

@@ -261,6 +261,32 @@ async function testBet(betType: 'red' | 'blue') {
   }
 }
 
+// Manual test hamburger button click
+async function testHamburgerClick() {
+  try {
+    await browser.runtime.sendMessage({
+      action: 'testHamburgerClick'
+    });
+    status.value = 'Testing hamburger button click...';
+    setTimeout(() => { status.value = ''; }, 2000);
+  } catch (error) {
+    console.error('Failed to trigger hamburger click:', error);
+  }
+}
+
+// Manual test submit player data
+async function testSubmitPlayerData() {
+  try {
+    await browser.runtime.sendMessage({
+      action: 'testSubmitPlayerData'
+    });
+    status.value = 'Submitting player data to API...';
+    setTimeout(() => { status.value = ''; }, 3000);
+  } catch (error) {
+    console.error('Failed to submit player data:', error);
+  }
+}
+
 // Initialize
 onMounted(async () => {
   await loadConfigurations();
@@ -370,6 +396,20 @@ onUnmounted(() => {
             🔵 Test WALA
           </button>
         </div>
+      </div>
+
+      <div class="form-group">
+        <label>Test Hamburger Button (Option 2):</label>
+        <button @click="testHamburgerClick" class="test-hamburger-btn">
+          🍔 Test Hamburger Click
+        </button>
+      </div>
+
+      <div class="form-group">
+        <label>Submit Player Data (Manual Test):</label>
+        <button @click="testSubmitPlayerData" class="test-submit-btn">
+          📤 Submit Player Data
+        </button>
       </div>
 
       <div class="form-group">
@@ -1165,5 +1205,55 @@ onUnmounted(() => {
 
 .test-bet-btn.wala-btn:hover {
   background: linear-gradient(135deg, #3b82f6, #2563eb);
+}
+
+.test-hamburger-btn {
+  width: 100%;
+  padding: 12px 16px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: white;
+  margin-top: 8px;
+}
+
+.test-hamburger-btn:hover {
+  background: linear-gradient(135deg, #fbbf24, #f59e0b);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+}
+
+.test-hamburger-btn:active {
+  transform: translateY(0);
+}
+
+.test-submit-btn {
+  width: 100%;
+  padding: 12px 16px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: white;
+  margin-top: 8px;
+}
+
+.test-submit-btn:hover {
+  background: linear-gradient(135deg, #34d399, #10b981);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+}
+
+.test-submit-btn:active {
+  transform: translateY(0);
 }
 </style>
