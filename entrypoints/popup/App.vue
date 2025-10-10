@@ -26,8 +26,8 @@ const meronButtonSelector = ref('button.from-red-600.to-red-900');
 const walaButtonSelector = ref('button.from-blue-600.to-blue-900');
 const usernameSelector = ref('p.text-sm.text-right.pr-1.leading-none');
 const balanceSelector = ref('p.text-vk884g-primary-color');
-const inputValue = ref('5');
-const limitBalance = ref('45');
+const inputValue = ref('2');
+const limitBalance = ref('25');
 const autoBettingEnabled = ref(true);
 const selectedButton = ref('red');
 

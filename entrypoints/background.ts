@@ -13,7 +13,7 @@ export default defineBackground(() => {
   let wsStatus = 'Disconnected';
   let wsMessages: string[] = [];
   let autoBettingEnabled = true;
-  let limitBalance = '45';
+  let limitBalance = '25';
   let selectedChannel = 'cockfight.channel.2';
   let selectedConfigName = 'Option 1';
   let configurations: any[] = [];
@@ -24,7 +24,7 @@ export default defineBackground(() => {
     walaButtonSelector: 'button.from-blue-600.to-blue-900',
     usernameSelector: 'p.text-sm.text-right.pr-1.leading-none',
     balanceSelector: 'p.text-vk884g-primary-color',
-    inputValue: '5',
+    inputValue: '2',
   };
 
   // Load configurations from storage
