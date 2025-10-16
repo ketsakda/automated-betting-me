@@ -13,6 +13,7 @@ export default defineBackground(() => {
   let wsStatus = 'Disconnected';
   let wsMessages: string[] = [];
   let autoBettingEnabled = true;
+  let isManualBet = false;
   let limitBalance = '25';
   let selectedChannel = 'cockfight.channel.2';
   let selectedConfigName = 'Option 1';
@@ -32,7 +33,7 @@ export default defineBackground(() => {
   // Load configurations from storage
   async function loadConfigurations() {
     try {
-      const result = await browser.storage.local.get(['selectorConfigs', 'limitBalance', 'autoBettingEnabled', 'selectedChannel', 'selectedConfigName', 'inputValue']);
+      const result = await browser.storage.local.get(['selectorConfigs', 'limitBalance', 'autoBettingEnabled', 'isManualBet', 'selectedChannel', 'selectedConfigName', 'inputValue']);
 
       if (result.selectorConfigs && Array.isArray(result.selectorConfigs)) {
         configurations = result.selectorConfigs;
@@ -67,6 +68,9 @@ export default defineBackground(() => {
       }
       if (result.autoBettingEnabled !== undefined) {
         autoBettingEnabled = result.autoBettingEnabled;
+      }
+      if (result.isManualBet !== undefined) {
+        isManualBet = result.isManualBet;
       }
       if (result.selectedChannel) {
         selectedChannel = result.selectedChannel;
@@ -245,7 +249,7 @@ export default defineBackground(() => {
         bet_amount: betAmountNum,
         limit_balance: limitBalanceNum,
         is_auto_bet: autoBettingEnabled,
-        is_manual_bet: false, // Extension bets are automated, not manual
+        is_manual_bet: isManualBet, // Use value from server sync
         channel_id: selectedChannel,
         option: optionName
       };
@@ -735,13 +739,23 @@ export default defineBackground(() => {
                 console.log(`✏️ Updated is_auto_bet: ${oldAutoBet} → ${newAutoBet}`);
               }
 
+              // Sync is_manual_bet
+              const oldManualBet = isManualBet;
+              const newManualBet = player.is_manual_bet ?? oldManualBet;
+              if (oldManualBet !== newManualBet) {
+                isManualBet = newManualBet;
+                changes.push(`Manual-Bet: ${oldManualBet} → ${newManualBet}`);
+                console.log(`✏️ Updated is_manual_bet: ${oldManualBet} → ${newManualBet}`);
+              }
+
               // Save all updated settings to storage
               await browser.storage.local.set({
                 inputValue: currentSelectors.inputValue,
                 limitBalance: limitBalance,
                 selectedChannel: selectedChannel,
                 selectedConfigName: selectedConfigName,
-                autoBettingEnabled: autoBettingEnabled
+                autoBettingEnabled: autoBettingEnabled,
+                isManualBet: isManualBet
               });
               console.log('💾 Settings saved to storage');
 
@@ -1030,6 +1044,7 @@ export default defineBackground(() => {
         wsStatus,
         wsMessages,
         autoBettingEnabled,
+        isManualBet,
         limitBalance,
         selectedChannel,
         selectedConfigName,
