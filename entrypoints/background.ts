@@ -17,6 +17,8 @@ export default defineBackground(() => {
   let selectedChannel = 'cockfight.channel.2';
   let selectedConfigName = 'Option 1';
   let configurations: any[] = [];
+  let lastPlayerUpdate: any = null;
+  let lastBetPlacement: any = null;
   let currentSelectors: any = {
     checkboxSelector: '#auto',
     inputSelector: 'input[placeholder="Enter Amount"]',
@@ -243,6 +245,7 @@ export default defineBackground(() => {
         bet_amount: betAmountNum,
         limit_balance: limitBalanceNum,
         is_auto_bet: autoBettingEnabled,
+        is_manual_bet: false, // Extension bets are automated, not manual
         channel_id: selectedChannel,
         option: optionName
       };
@@ -366,12 +369,29 @@ export default defineBackground(() => {
         updateBadge(wsStatus);
         addWsMessage('✅ Connected to Pusher');
 
-        const subscribeMsg = {
+        // Subscribe to cockfight-matches channel
+        const subscribeMatchesMsg = {
           event: 'pusher:subscribe',
           data: { channel: 'cockfight-matches' }
         };
-        pusherWs?.send(JSON.stringify(subscribeMsg));
+        pusherWs?.send(JSON.stringify(subscribeMatchesMsg));
         addWsMessage('📢 Subscribing to cockfight-matches');
+
+        // Subscribe to players channel
+        const subscribePlayersMsg = {
+          event: 'pusher:subscribe',
+          data: { channel: 'players' }
+        };
+        pusherWs?.send(JSON.stringify(subscribePlayersMsg));
+        addWsMessage('📢 Subscribing to players');
+
+        // Subscribe to bets channel
+        const subscribeBetsMsg = {
+          event: 'pusher:subscribe',
+          data: { channel: 'bets' }
+        };
+        pusherWs?.send(JSON.stringify(subscribeBetsMsg));
+        addWsMessage('📢 Subscribing to bets');
       };
 
       pusherWs.onmessage = async (event) => {
@@ -563,6 +583,391 @@ export default defineBackground(() => {
                 console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
               }
             }, 5000);
+          } else if (data.event === 'player.updated' || data.event === '.player.updated') {
+            console.log('👤 PLAYER UPDATED EVENT RECEIVED!');
+
+            let eventData = data.data;
+            if (typeof eventData === 'string') eventData = JSON.parse(eventData);
+
+            const player = eventData.player;
+            const message = eventData.message;
+
+            console.log('Player update message:', message);
+            console.log('Player data:', player);
+
+            // Store last player update
+            lastPlayerUpdate = {
+              player: player,
+              message: message,
+              timestamp: new Date().toISOString()
+            };
+
+            // Fetch username if not available
+            if (currentUsername === 'Not found' || !currentUsername) {
+              console.log('⚠️ Username not found, attempting to fetch before sync check...');
+              console.log('Current configuration:', selectedConfigName);
+              console.log('Username selector:', currentSelectors.usernameSelector);
+              addWsMessage(`🔄 Fetching username for sync check (config: ${selectedConfigName})...`);
+
+              // For Option 2, click hamburger button FIRST before fetching
+              if (selectedConfigName === 'Option 2') {
+                console.log('Option 2 detected - clicking hamburger button FIRST...');
+                console.log('Hamburger selector:', currentSelectors.hamburgerButtonSelector);
+                addWsMessage(`🍔 Clicking hamburger button (Option 2)...`);
+                const clicked = await clickHamburgerButton();
+
+                if (clicked) {
+                  console.log('Hamburger button clicked, waiting 1.5s for menu to open...');
+                  await sleep(1500); // Wait for UI to update
+                  addWsMessage(`✅ Hamburger menu opened`);
+                } else {
+                  console.log('❌ Hamburger button click failed');
+                  addWsMessage(`❌ Failed to click hamburger button`);
+                }
+              }
+
+              // Now fetch the username
+              await fetchBalance();
+              console.log('After fetchBalance:', {
+                username: currentUsername,
+                balance: currentBalance
+              });
+
+              // If still not found with Option 1, log it
+              if ((currentUsername === 'Not found' || !currentUsername) && selectedConfigName === 'Option 1') {
+                console.log('⚠️ Username still not found with Option 1 selector');
+                addWsMessage(`⚠️ Option 1: Username not found on page`);
+              }
+
+              // If still not found, log detailed warning
+              if (currentUsername === 'Not found' || !currentUsername) {
+                console.log('⚠️ Username still not found after fetch attempts');
+                console.log('Tried selector:', currentSelectors.usernameSelector);
+                console.log('Configuration:', selectedConfigName);
+                addWsMessage(`⚠️ Cannot sync: username unavailable`);
+                addWsMessage(`   Using selector: ${currentSelectors.usernameSelector}`);
+              } else {
+                console.log('✅ Username successfully fetched:', currentUsername);
+                addWsMessage(`✅ Username found: ${currentUsername}`);
+              }
+            }
+
+            // Check if this update is for the current user
+            console.log('Username check:', {
+              eventUsername: player.username,
+              currentUsername: currentUsername,
+              matches: player.username === currentUsername
+            });
+
+            // If username is still "Not found", we'll sync anyway but store the username from the event
+            const shouldSync = player.username === currentUsername ||
+                              (currentUsername === 'Not found' || !currentUsername);
+
+            if (shouldSync) {
+              // If we don't have a username yet, use the one from the event
+              if (currentUsername === 'Not found' || !currentUsername) {
+                console.log('📝 Using username from player.updated event:', player.username);
+                addWsMessage(`📝 Setting username from server: ${player.username}`);
+                currentUsername = player.username;
+                // Update popup
+                broadcastToPopup({
+                  type: 'balanceUpdate',
+                  username: currentUsername,
+                  balance: currentBalance,
+                });
+              }
+              console.log('🔄 Username matches! Syncing settings from server...');
+              addWsMessage(`🔄 Syncing settings from server for ${player.username}...`);
+
+              // Track changes for logging
+              const changes: string[] = [];
+
+              // Sync bet_amount
+              const oldBetAmount = currentSelectors.inputValue;
+              const newBetAmount = player.bet_amount?.toString() || oldBetAmount;
+              if (oldBetAmount !== newBetAmount) {
+                currentSelectors.inputValue = newBetAmount;
+                changes.push(`Bet Amount: ${oldBetAmount} → ${newBetAmount}`);
+                console.log(`✏️ Updated bet_amount: ${oldBetAmount} → ${newBetAmount}`);
+              }
+
+              // Sync limit_balance
+              const oldLimitBalance = limitBalance;
+              const newLimitBalance = player.limit_balance?.toString() || oldLimitBalance;
+              if (oldLimitBalance !== newLimitBalance) {
+                limitBalance = newLimitBalance;
+                changes.push(`Limit Balance: ${oldLimitBalance} → ${newLimitBalance}`);
+                console.log(`✏️ Updated limit_balance: ${oldLimitBalance} → ${newLimitBalance}`);
+              }
+
+              // Sync channel_id
+              const oldChannel = selectedChannel;
+              const newChannel = player.channel_id || oldChannel;
+              if (oldChannel !== newChannel) {
+                selectedChannel = newChannel;
+                changes.push(`Channel: ${oldChannel} → ${newChannel}`);
+                console.log(`✏️ Updated channel_id: ${oldChannel} → ${newChannel}`);
+              }
+
+              // Sync option (convert to proper case: "option 1" → "Option 1")
+              const oldOption = selectedConfigName;
+              let newOption = oldOption;
+              if (player.option) {
+                // Capitalize first letter of each word
+                newOption = player.option
+                  .split(' ')
+                  .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+                  .join(' ');
+              }
+              if (oldOption !== newOption) {
+                selectedConfigName = newOption;
+                switchConfiguration(); // Apply new configuration
+                changes.push(`Option: ${oldOption} → ${newOption}`);
+                console.log(`✏️ Updated option: ${oldOption} → ${newOption}`);
+              }
+
+              // Sync is_auto_bet
+              const oldAutoBet = autoBettingEnabled;
+              const newAutoBet = player.is_auto_bet ?? oldAutoBet;
+              if (oldAutoBet !== newAutoBet) {
+                autoBettingEnabled = newAutoBet;
+                changes.push(`Auto-Bet: ${oldAutoBet} → ${newAutoBet}`);
+                console.log(`✏️ Updated is_auto_bet: ${oldAutoBet} → ${newAutoBet}`);
+              }
+
+              // Save all updated settings to storage
+              await browser.storage.local.set({
+                inputValue: currentSelectors.inputValue,
+                limitBalance: limitBalance,
+                selectedChannel: selectedChannel,
+                selectedConfigName: selectedConfigName,
+                autoBettingEnabled: autoBettingEnabled
+              });
+              console.log('💾 Settings saved to storage');
+
+              // Log summary of changes
+              if (changes.length > 0) {
+                addWsMessage(`✅ Synced ${changes.length} setting(s) from server`);
+                changes.forEach(change => {
+                  addWsMessage(`   ${change}`);
+                  console.log(`   ${change}`);
+                });
+              } else {
+                addWsMessage(`✅ Settings already up to date`);
+                console.log('✅ No settings changes needed');
+              }
+
+              // Submit updated player data back to server to confirm sync
+              addWsMessage(`📤 Submitting synced data back to server...`);
+              await submitPlayerData();
+
+              // Broadcast settings sync to popup
+              broadcastToPopup({
+                type: 'settingsSynced',
+                settings: {
+                  inputValue: currentSelectors.inputValue,
+                  limitBalance: limitBalance,
+                  selectedChannel: selectedChannel,
+                  selectedConfigName: selectedConfigName,
+                  autoBettingEnabled: autoBettingEnabled
+                },
+                changes: changes
+              });
+            } else {
+              console.log('⏭️ Username does not match current user, skipping sync');
+              addWsMessage(`👤 Player update for ${player.username} (not current user)`);
+            }
+
+            // Add to WebSocket messages
+            addWsMessage(`👤 ${message}`);
+            addWsMessage(`   Username: ${player.username}, Balance: $${player.balance}`);
+
+            // Broadcast to popup
+            broadcastToPopup({
+              type: 'playerUpdate',
+              player: player,
+              message: message
+            });
+
+            console.log('Player update details:', {
+              id: player.id,
+              username: player.username,
+              balance: player.balance,
+              bet_amount: player.bet_amount,
+              limit_balance: player.limit_balance,
+              is_auto_bet: player.is_auto_bet,
+              is_manual_bet: player.is_manual_bet,
+              channel_id: player.channel_id,
+              option: player.option,
+              play_date: player.play_date,
+              updated_at: player.updated_at
+            });
+          } else if (data.event === 'bet.placed' || data.event === '.bet.placed') {
+            console.log('🎰 BET PLACED EVENT RECEIVED!');
+
+            let eventData = data.data;
+            if (typeof eventData === 'string') eventData = JSON.parse(eventData);
+
+            const betType = eventData.bet_type;
+            const players = eventData.players;
+            const totalBetAmount = eventData.total_bet_amount;
+            const validBettersCount = eventData.valid_betters_count;
+            const totalPlayersCount = eventData.total_players_count;
+            const timestamp = eventData.timestamp;
+            const message = eventData.message;
+
+            console.log('Bet placement message:', message);
+            console.log('Bet type:', betType);
+            console.log('Total bet amount:', totalBetAmount);
+            console.log('Valid betters:', validBettersCount, '/', totalPlayersCount);
+            console.log('Players:', players);
+
+            // Store last bet placement
+            lastBetPlacement = {
+              bet_type: betType,
+              players: players,
+              total_bet_amount: totalBetAmount,
+              valid_betters_count: validBettersCount,
+              total_players_count: totalPlayersCount,
+              timestamp: timestamp,
+              message: message
+            };
+
+            // Add to WebSocket messages
+            addWsMessage(`🎰 ${message}`);
+            addWsMessage(`   ${betType}: $${totalBetAmount} (${validBettersCount} betters)`);
+
+            // Broadcast to popup
+            broadcastToPopup({
+              type: 'betPlaced',
+              bet_type: betType,
+              players: players,
+              total_bet_amount: totalBetAmount,
+              valid_betters_count: validBettersCount,
+              total_players_count: totalPlayersCount,
+              message: message
+            });
+
+            // Sync settings if current user is in the players array
+            // Fetch username if not available
+            if (currentUsername === 'Not found' || !currentUsername) {
+              console.log('⚠️ Username not found for bet.placed, attempting to fetch...');
+              console.log('Current configuration:', selectedConfigName);
+              addWsMessage(`🔄 Fetching username for bet sync check...`);
+
+              // For Option 2, click hamburger button FIRST before fetching
+              if (selectedConfigName === 'Option 2') {
+                console.log('Option 2 detected - clicking hamburger button FIRST...');
+                addWsMessage(`🍔 Clicking hamburger button (Option 2)...`);
+                const clicked = await clickHamburgerButton();
+
+                if (clicked) {
+                  console.log('Hamburger button clicked, waiting 1.5s for menu to open...');
+                  await sleep(1500);
+                  addWsMessage(`✅ Hamburger menu opened`);
+                } else {
+                  console.log('❌ Hamburger button click failed');
+                  addWsMessage(`❌ Failed to click hamburger button`);
+                }
+              }
+
+              // Now fetch the username
+              await fetchBalance();
+              console.log('After fetchBalance for bet.placed:', {
+                username: currentUsername,
+                balance: currentBalance
+              });
+            }
+
+            // Find current user in players array
+            let currentUserInBet = null;
+            if (players && Array.isArray(players)) {
+              // Try to match by username
+              currentUserInBet = players.find((p: any) => p.username === currentUsername);
+
+              // If not found and currentUsername is "Not found", try to find any player and use as fallback
+              if (!currentUserInBet && (currentUsername === 'Not found' || !currentUsername) && players.length > 0) {
+                console.log('⚠️ Username not found, checking first player in array');
+                currentUserInBet = players[0];
+                console.log('📝 Using player from bet event:', currentUserInBet.username);
+                addWsMessage(`📝 Setting username from bet event: ${currentUserInBet.username}`);
+                currentUsername = currentUserInBet.username;
+                // Update popup
+                broadcastToPopup({
+                  type: 'balanceUpdate',
+                  username: currentUsername,
+                  balance: currentBalance,
+                });
+              }
+            }
+
+            if (currentUserInBet) {
+              console.log('✅ Current user found in bet.placed players:', currentUserInBet);
+              addWsMessage(`🔄 Syncing from bet.placed event for ${currentUserInBet.username}...`);
+
+              // Track changes for logging
+              const changes: string[] = [];
+
+              // Sync bet_amount from the bet
+              const oldBetAmount = currentSelectors.inputValue;
+              const newBetAmount = currentUserInBet.bet_amount?.toString() || oldBetAmount;
+              if (oldBetAmount !== newBetAmount) {
+                currentSelectors.inputValue = newBetAmount;
+                changes.push(`Bet Amount: ${oldBetAmount} → ${newBetAmount}`);
+                console.log(`✏️ Updated bet_amount from bet: ${oldBetAmount} → ${newBetAmount}`);
+              }
+
+              // Update balance if available
+              if (currentUserInBet.balance !== undefined) {
+                const newBalance = currentUserInBet.balance.toString();
+                if (currentBalance !== newBalance) {
+                  currentBalance = newBalance;
+                  console.log(`✏️ Updated balance from bet: ${newBalance}`);
+                  broadcastToPopup({
+                    type: 'balanceUpdate',
+                    username: currentUsername,
+                    balance: currentBalance,
+                  });
+                }
+              }
+
+              // Save updated settings to storage
+              if (changes.length > 0) {
+                await browser.storage.local.set({
+                  inputValue: currentSelectors.inputValue,
+                });
+                console.log('💾 Bet settings saved to storage');
+
+                // Log summary of changes
+                addWsMessage(`✅ Synced ${changes.length} setting(s) from bet.placed`);
+                changes.forEach(change => {
+                  addWsMessage(`   ${change}`);
+                  console.log(`   ${change}`);
+                });
+
+                // Submit updated player data back to server to confirm sync
+                addWsMessage(`📤 Submitting synced data after bet...`);
+                await submitPlayerData();
+
+                // Broadcast settings sync to popup
+                broadcastToPopup({
+                  type: 'settingsSynced',
+                  settings: {
+                    inputValue: currentSelectors.inputValue,
+                    limitBalance: limitBalance,
+                    selectedChannel: selectedChannel,
+                    selectedConfigName: selectedConfigName,
+                    autoBettingEnabled: autoBettingEnabled
+                  },
+                  changes: changes
+                });
+              } else {
+                console.log('✅ No bet settings changes needed');
+              }
+            } else {
+              console.log('⏭️ Current user not found in bet.placed players array');
+              addWsMessage(`👤 Bet placed (not by current user)`);
+            }
           }
         } catch (err) {
           console.error('Error processing message:', err);
@@ -629,6 +1034,8 @@ export default defineBackground(() => {
         selectedChannel,
         selectedConfigName,
         inputValue: currentSelectors.inputValue,
+        lastPlayerUpdate: lastPlayerUpdate,
+        lastBetPlacement: lastBetPlacement,
       });
       return true;
     }
