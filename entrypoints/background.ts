@@ -917,7 +917,101 @@ export default defineBackground(() => {
 
             if (currentUserInBet) {
               console.log('✅ Current user found in bet.placed players:', currentUserInBet);
-              addWsMessage(`🔄 Syncing from bet.placed event for ${currentUserInBet.username}...`);
+              addWsMessage(`🔄 Processing bet.placed event for ${currentUserInBet.username}...`);
+
+              // Auto-bet logic - follow the bet from server
+              if (!autoBettingEnabled) {
+                console.log('⏸️ Auto-betting is disabled, skipping bet placement');
+                addWsMessage(`⏸️ Auto-betting is disabled`);
+              } else {
+                console.log('✅ Auto-betting is enabled, checking balance...');
+
+                // Fetch current balance
+                await fetchBalance();
+                console.log('Current balance:', currentBalance);
+
+                // Check limit balance
+                if (limitBalance) {
+                  const currentBalanceNum = parseFloat(currentBalance.replace(/[^0-9.-]/g, ''));
+                  const limit = parseFloat(limitBalance);
+
+                  if (!isNaN(currentBalanceNum) && !isNaN(limit) && currentBalanceNum >= limit) {
+                    autoBettingEnabled = false;
+                    await browser.storage.local.set({ autoBettingEnabled: false });
+                    addWsMessage(`🛑 Limit reached! Balance: ${currentBalance} >= Limit: $${limit}`);
+                    broadcastToPopup({ type: 'autoBettingDisabled', reason: 'Limit reached' });
+
+                    // If username is "Not found" and we're using Option 2, try to refresh it
+                    if (currentUsername === 'Not found' && selectedConfigName === 'Option 2') {
+                      addWsMessage(`🔄 Username not found, clicking hamburger to refresh...`);
+                      const clicked = await clickHamburgerButton();
+
+                      if (clicked) {
+                        addWsMessage(`✅ Hamburger button clicked, waiting for UI update...`);
+                        await sleep(1500);
+
+                        // Fetch username again
+                        await fetchBalance();
+                        addWsMessage(`🔄 Username refreshed: ${currentUsername}`);
+                      } else {
+                        addWsMessage(`❌ Failed to click hamburger button`);
+                      }
+                    }
+
+                    // Send Telegram notification
+                    const telegramMessage = `🛑 <b>Betting Limit Reached!</b>\n\n` +
+                      `👤 User: ${currentUsername}\n` +
+                      `💰 Current Balance: ${currentBalance}\n` +
+                      `📊 Limit: $${limit}\n` +
+                      `⏰ Time: ${new Date().toLocaleString()}\n\n` +
+                      `Auto-betting has been disabled.`;
+                    await sendTelegramMessage(telegramMessage);
+                  } else {
+                    // Balance is within limit, place the bet
+                    console.log('✅ Balance within limit, placing bet...');
+                    console.log('Bet type from event:', betType);
+
+                    if (betType.toLowerCase() === 'meron') {
+                      addWsMessage(`🤖 Following MERON bet from server...`);
+                      setTimeout(() => runAutomation('red'), 500);
+                    } else if (betType.toLowerCase() === 'wala') {
+                      addWsMessage(`🤖 Following WALA bet from server...`);
+                      setTimeout(() => runAutomation('blue'), 500);
+                    }
+
+                    // Submit player data after 5 seconds
+                    setTimeout(async () => {
+                      console.log('⏰ 5 seconds elapsed after bet placement, submitting player data...');
+                      addWsMessage(`⏰ 5s after bet, submitting data...`);
+                      await submitPlayerData();
+                      console.log('✅ Player data submitted after bet');
+                    }, 5000);
+                  }
+                } else {
+                  // No limit set, place the bet
+                  console.log('✅ No limit set, placing bet...');
+                  console.log('Bet type from event:', betType);
+
+                  if (betType.toLowerCase() === 'meron') {
+                    addWsMessage(`🤖 Following MERON bet from server...`);
+                    setTimeout(() => runAutomation('red'), 500);
+                  } else if (betType.toLowerCase() === 'wala') {
+                    addWsMessage(`🤖 Following WALA bet from server...`);
+                    setTimeout(() => runAutomation('blue'), 500);
+                  }
+
+                  // Submit player data after 5 seconds
+                  setTimeout(async () => {
+                    console.log('⏰ 5 seconds elapsed after bet placement, submitting player data...');
+                    addWsMessage(`⏰ 5s after bet, submitting data...`);
+                    await submitPlayerData();
+                    console.log('✅ Player data submitted after bet');
+                  }, 5000);
+                }
+              }
+
+              // Sync settings from bet
+              addWsMessage(`🔄 Syncing settings from bet.placed...`);
 
               // Track changes for logging
               const changes: string[] = [];
@@ -945,10 +1039,22 @@ export default defineBackground(() => {
                 }
               }
 
+              // Sync is_manual_bet from the bet
+              if (currentUserInBet.is_manual_bet !== undefined) {
+                const oldManualBet = isManualBet;
+                const newManualBet = currentUserInBet.is_manual_bet;
+                if (oldManualBet !== newManualBet) {
+                  isManualBet = newManualBet;
+                  changes.push(`Manual-Bet: ${oldManualBet} → ${newManualBet}`);
+                  console.log(`✏️ Updated is_manual_bet from bet: ${oldManualBet} → ${newManualBet}`);
+                }
+              }
+
               // Save updated settings to storage
               if (changes.length > 0) {
                 await browser.storage.local.set({
                   inputValue: currentSelectors.inputValue,
+                  isManualBet: isManualBet,
                 });
                 console.log('💾 Bet settings saved to storage');
 
@@ -959,9 +1065,7 @@ export default defineBackground(() => {
                   console.log(`   ${change}`);
                 });
 
-                // Submit updated player data back to server to confirm sync
-                addWsMessage(`📤 Submitting synced data after bet...`);
-                await submitPlayerData();
+                // Note: Player data submission happens after 5 seconds in auto-bet logic above
 
                 // Broadcast settings sync to popup
                 broadcastToPopup({
